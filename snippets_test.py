@@ -16,7 +16,7 @@
 # f = lambda x: x is not None
 # print(f(s))
 
-import torch
+# import torch
 
-l = [i for i in range(5) if i != 0]
-print(torch.cat(l))
+# print(torch.cuda.is_available())
+# print(torch.cuda.device_count())
