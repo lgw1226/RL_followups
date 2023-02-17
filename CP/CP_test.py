@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
+
 ENV_NAME = "CartPole-v1"  # environment name
 N_STEPS = 100  # number of steps to play
 
@@ -47,5 +48,10 @@ for _ in range(N_STEPS):
     action = trained_policy_net(observation).max(1)[1].view(1, 1)
     observation, reward, terminated, truncated, _ = env.step(action.item())
     reward = torch.tensor([reward], device=device)
+    
+    # done = terminated or truncated
+
+    # if done:
+    #     break
 
 env.close()
