@@ -24,10 +24,10 @@ n_observations = len(observation)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Adjust policy network structure according to the trained network
-class PolicyNet(nn.Module):
+class QNet(nn.Module):
 
     def __init__(self, n_observations, n_actions) -> None:
-        super(PolicyNet, self).__init__()
+        super(QNet, self).__init__()
         self.layer1 = nn.Linear(n_observations, 128)
         self.layer2 = nn.Linear(128, 128)
         self.layer3 = nn.Linear(128, n_actions)
@@ -38,7 +38,7 @@ class PolicyNet(nn.Module):
         return self.layer3(x)
 
 
-trained_policy_net = PolicyNet(n_observations, n_actions).to(device)
+trained_policy_net = QNet(n_observations, n_actions).to(device)
 trained_policy_net.load_state_dict(torch.load("./LL_trained"))
 trained_policy_net.eval()
 

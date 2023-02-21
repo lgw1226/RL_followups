@@ -160,7 +160,7 @@ for i_episode in range(num_episodes):
     
     # Play and train from an episode
     total_reward = 0  # total reward for an episode
-    for n_steps in count():
+    for i_step in count():
         action = select_action(state)
         observation, reward, terminated, truncated, _ = env.step(action.item())
         total_reward += reward
