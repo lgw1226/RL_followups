@@ -1,110 +1,174 @@
+"""
+LL_train_VPG.py
+
+The original version of the code can be found at 
+https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html
+"""
+
 import torch
 import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
-from torch.optim import Adam
-import numpy as np
+from torch.optim import AdamW
+
 import gymnasium as gym
-from gymnasium.spaces import Discrete, Box
+import matplotlib
+import matplotlib.pyplot as plt
 
-def mlp(sizes, activation=nn.Tanh, output_activation=nn.Identity):
-    """Build a feedforward neural network"""
-    layers = []
-    for j in range(len(sizes)-1):
-        act = activation if j < len(sizes)-2 else output_activation
-        layers += [nn.Linear(sizes[j], sizes[j+1]), act()]
-    return nn.Sequential(*layers)
+import math
+import random
+import numpy as np
+from itertools import count
 
-def train(env_name="CartPole-v1", hidden_sizes=[32], lr=1e-2,
-          epochs=50, batch_size=5000, render=False):
-    
-    if render:
-        env = gym.make(env_name, render="human")
-    else:
-        env = gym.make(env_name)
-    
-    assert isinstance(env.observation_space, Box), \
-        "This example only works for envs with continuous state spaces."
-    assert isinstance(env.action_space, Discrete), \
-        "This example only works for envs with discrete action spaces."
+# Setting up gym, cuda
+ENV_NAME = "LunarLander-v2"
+RENDER = False
 
-    obs_dim = env.observation_space.shape[0]
-    n_acts = env.action_space.n
+if RENDER:
+    env = gym.make(ENV_NAME, render_mode="human")
+else:
+    env = gym.make(ENV_NAME)
 
-    logits_net = mlp(sizes=[obs_dim]+hidden_sizes+[n_acts])
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("environment:", ENV_NAME)
+print("torch.device:", DEVICE)
 
-    def get_policy(obs):
-        logits = logits_net(obs)  # log probabilities
-        return Categorical(logits=logits)
+# Hyperparameters
+EPOCHS = 300
+HIDDEN_SIZES = [150, 150]
+BATCH_SIZE = 5  # the number of episodes to calculate gradient
+LR = 1e-3
 
-    def get_action(obs):
-        return get_policy(obs).sample().item()
-
-    def compute_loss(obs, act, weights):
-        logp = get_policy(obs).log_prob(act)
-        return -(logp * weights).mean()
-
-    optimizer = Adam(logits_net.parameters(), lr=lr)
-
-    def train_one_epoch():
-        batch_obs = []
-        batch_acts = []
-        batch_weights = []
-        batch_rets = []
-        batch_lens = []
-
-        obs, _ = env.reset()
-        done = False
-        ep_rews = []
-
-        finished_rendering_this_epoch = False
-
-        while True:
-            if (not finished_rendering_this_epoch) and render:
-                env.render()
-
-            batch_obs.append(obs.copy())
-
-            act = get_action(torch.as_tensor(obs, dtype=torch.float32))
-            obs, rew, term, trunc, _ = env.step(act)
-            done = term or trunc
-
-            batch_acts.append(act)
-            ep_rews.append(rew)
-
-            if done:
-                ep_ret, ep_len = sum(ep_rews), len(ep_rews)
-                batch_rets.append(ep_ret)
-                batch_lens.append(ep_len)
-
-                batch_weights += [ep_ret] * ep_len
-                
-                obs, _ = env.reset()
-                done, ep_rews = False, []
-
-                finished_rendering_this_epoch = True
-
-                if len(batch_obs) > batch_size:
-                    break
+# NN
+class NN(nn.Module):
+    def __init__(self, sizes=[]) -> None:
+        super(NN, self).__init__()
         
-        optimizer.zero_grad()
-        batch_loss = compute_loss(obs=torch.as_tensor(batch_obs, dtype=torch.float32),
-                                  act=torch.as_tensor(batch_acts, dtype=torch.int32),
-                                  weights=torch.as_tensor(batch_weights, dtype=torch.float32))
-        batch_loss.backward()
-        optimizer.step()
-        return batch_loss, batch_rets, batch_lens
+        self.sizes = sizes
+        self.layers = nn.ModuleList()  # len(self.size)-1 layers in self.layers
+        for i in range(len(self.sizes)-1):
+            self.layers.append(nn.Linear(self.sizes[i], self.sizes[i+1]))
+    
+    def forward(self, x):
+        for i in range(len(self.sizes)-1):
+            x = self.layers[i](x)
+            if i == len(self.sizes)-2:  # skip activation for the last layer
+                return x
+            else:
+                x = F.relu(x)
 
-    for i in range(epochs):
-        batch_loss, batch_rets, batch_lens = train_one_epoch()
-        print('epoch: %3d \t loss: %.3f \t return: %.3f \t ep_len: %.3f'%
-                (i, batch_loss, np.mean(batch_rets), np.mean(batch_lens)))
 
-if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--env_name', '--env', type=str, default='CartPole-v1')
-    parser.add_argument('--render', action='store_true')
-    parser.add_argument('--lr', type=float, default=1e-2)
-    args = parser.parse_args()
-    print('\nUsing simplest formulation of policy gradient.\n')
-    train(env_name=args.env_name, render=args.render, lr=args.lr)
+# Making environment and policy net
+obs, _ = env.reset()
+n_obs = len(obs)  # dimension of the state space
+n_act = env.action_space.n  # number of actions an agent can take
+
+sizes = [n_obs] + HIDDEN_SIZES + [n_act]
+policy_net = NN(sizes).to(DEVICE)
+
+def get_policy(obs):
+    logits = policy_net(obs)
+    return Categorical(logits=logits)  # softmax of network outcomes
+
+def get_action(obs):
+    return get_policy(obs).sample().item()
+
+def compute_loss(obs, act, weights):
+    logp = get_policy(obs).log_prob(act)
+    return -(logp * weights).mean()
+
+def reward_to_go(ep_reward):
+    n = len(ep_reward)
+    rtgs = np.zeros_like(ep_reward)
+    for i in reversed(range(n)):
+        rtgs[i] = ep_reward[i] + (rtgs[i+1] if i+1 < n else 0)
+    return list(rtgs)
+
+# Computing gradient for (BATCH_SIZE) episodes
+def compute_batch_loss():
+    batch_obs = []
+    batch_act = []
+    batch_weight = []
+    batch_return = []
+    batch_len = []
+
+    for i in range(BATCH_SIZE):
+        ep_obs = []
+        ep_act = []
+        ep_reward = []
+        ep_weight = []
+
+        obs, info = env.reset()
+
+        for t in count():  # timestep t
+            ep_obs.append(obs)
+
+            act = get_action(torch.as_tensor(obs, dtype=torch.float32, device=DEVICE))
+            ep_act.append(act)
+
+            obs, reward, terminated, truncated, info = env.step(act)
+            ep_reward.append(reward)
+
+            done = terminated or truncated
+
+            if done:  # if the episode is terminated or truncated
+                ep_len = t + 1  # length of the episode
+                ep_return = sum(ep_reward)  # total reward from start to end
+                ep_weight = reward_to_go(ep_reward)
+
+                batch_obs += (ep_obs)
+                batch_act += (ep_act)
+                batch_weight += (ep_weight)
+                batch_len.append(ep_len)
+                batch_return.append(ep_return)
+
+                break
+
+    batch_loss = compute_loss(obs=torch.as_tensor(np.array(batch_obs), dtype=torch.float32, device=DEVICE),
+                            act=torch.as_tensor(batch_act, dtype=torch.int32, device=DEVICE),
+                            weights=torch.as_tensor(batch_weight, dtype=torch.float32, device=DEVICE))
+    
+    return batch_loss, batch_return, batch_len
+
+returns = []
+
+def plot_returns(show_result=False):
+    plt.figure(1)
+    returns_t = torch.tensor(returns, dtype=torch.float)  # np.ndarray to torch.tensor
+    if show_result:
+        plt.title('Result')
+    else:
+        plt.clf()
+        plt.title('Training...')
+    plt.xlabel('Epochs')
+    plt.ylabel('Return')
+    plt.plot(returns_t.numpy())
+    if len(returns_t) >= 100:
+        means = returns_t.unfold(0, 100, 1).mean(1).view(-1)
+        means = torch.cat((torch.zeros(99), means))
+        plt.plot(means.numpy())
+
+    plt.pause(0.001)
+
+optimizer = AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
+
+for epoch in range(EPOCHS):
+    optimizer.zero_grad()
+
+    batch_loss, batch_return, batch_len = compute_batch_loss()
+    print('epoch: %3d \t loss: %.3f \t return: %.3f \t ep_len: %.3f'%
+                (epoch+1, batch_loss, np.mean(batch_return), np.mean(batch_len)))
+    returns.append(np.mean(batch_return))
+
+    batch_loss.backward()
+    optimizer.step()
+
+    plot_returns()
+
+torch.save(policy_net.state_dict(), "./LL/LL_trained_VPG")
+
+plot_returns(show_result=True)
+plt.show()
+
+env.close()

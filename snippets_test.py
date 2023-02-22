@@ -21,6 +21,5 @@
 # print(torch.cuda.is_available())
 # print(torch.cuda.device_count())
 
-import random
-
-print()
+for i in reversed(range(3)):
+    print(i)
