@@ -1,20 +1,25 @@
-import gymnasium as gym
 import math
 import random
 from collections import namedtuple, deque
 from itertools import count
+
+import gymnasium as gym
+from gymnasium.utils.save_video import save_video
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
+import numpy as np
+
 
 ENV_NAME = "MountainCarContinuous-v0"  # environment name
 N_EPISODE = 1  # number of episodes to play
 
 # Gym environment
-env = gym.make(ENV_NAME, render_mode="human")
+env = gym.make(ENV_NAME, render_mode="rgb_array_list")
+print(env.metadata)
 
 observation, info = env.reset()
 n_observations = env.observation_space.shape[0]
@@ -79,8 +84,13 @@ for i in range(N_EPISODE):
         done = terminated or truncated
 
         if done:
+            save_video(
+                env.render(),
+                "./MC",
+                name_prefix="MC_DDPG",
+                fps=env.metadata["render_fps"])
+            print("Return of the episode: %.3f" % (sum(ep_rewards)))
             observation, info = env.reset()
-            print(sum(ep_rewards))
             break
 
 env.close()
