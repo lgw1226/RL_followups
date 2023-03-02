@@ -1,13 +1,15 @@
+import random
+from itertools import count
+from collections import namedtuple, deque
+from torch.utils.tensorboard import SummaryWriter
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+
 import numpy as np
-from collections import namedtuple, deque
-import random
 import gymnasium as gym
 import matplotlib.pyplot as plt
-from itertools import count
 
 # Replay Buffer
 Transition = namedtuple("Transition", ("state", "action", "reward", "next_state", "done"))
@@ -79,7 +81,7 @@ def get_q_val(q_net: NN, obs: torch.Tensor, action: torch.Tensor) -> torch.Tenso
     return q_net(x)
 
 def train_DDPG(env: gym.Env, replay_buffer: ReplayBuffer,
-               p_net: NN, p_targ_net: NN, q_net: NN, q_targ_net: NN, device, 
+               p_net: NN, p_targ_net: NN, q_net: NN, q_targ_net: NN, device, writer,
                gamma=0.99, n_episode=1000, lr_p=0.0001, lr_q=0.005, batch_size=100, tau_p=0.3, tau_q=0.1):
     '''Train given p_net & q_net and save the result.'''
 
@@ -136,6 +138,7 @@ def train_DDPG(env: gym.Env, replay_buffer: ReplayBuffer,
             if done:
                 obs, info = env.reset()
                 episode_rewards.append(np.sum(rewards))
+                writer.add_scalar("train/reward", np.sum(rewards), t)
                 plot_rewards()
                 break
             
@@ -165,6 +168,7 @@ def train_DDPG(env: gym.Env, replay_buffer: ReplayBuffer,
                 # compute q-function gradient descent
                 q_loss_t = torch.mean(torch.square(get_q_val(q_net, batch_obs_t, batch_actions_t) - q_targ_t), 0)
                 # print(q_loss_t)
+                writer.add_scalar("train/q_loss", q_loss_t, t)
 
                 # update q-function
                 q_optimizer.zero_grad()
@@ -222,4 +226,6 @@ if __name__ == "__main__":
 
     buffer = ReplayBuffer(10000)
 
-    train_DDPG(env, buffer, p_net, p_targ_net, q_net, q_targ_net, DEVICE, n_episode=1000, batch_size=1000)
+    writer =  SummaryWriter(('/home/gawon/RL_followups/exp/tb/{}'.format(ENV_NAME)))
+
+    train_DDPG(env, buffer, p_net, p_targ_net, q_net, q_targ_net, DEVICE, writer, n_episode=100, batch_size=1000)

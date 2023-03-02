@@ -1,10 +1,8 @@
 import torch
-import numpy as np
-import random
-from collections import namedtuple, deque
 
-x = torch.tensor([1, 2], dtype=torch.float32)
-y = torch.tensor([3, 4], dtype=torch.float32)
+x = torch.arange(0, 9, 1).view(-1, 3)
+y = torch.normal(0, 1, size=x.size())
 
-avg = torch.mean(torch.square(x - y))
-print(avg)
+batch = (x, y)
+a, b, c = [*zip(*batch)]
+print(a, b, c)
