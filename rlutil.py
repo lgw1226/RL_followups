@@ -11,6 +11,9 @@ def plot_returns(episode_returns: torch.Tensor, show_result=False):
         episode_returns: torch.Tensor containing return for each episode
         show_result: If true, plot result
     """
+    episode_returns_np = episode_returns
+    episode_returns_np = episode_returns_np.to("cpu").numpy()
+
     plt.figure(1)
     if show_result:  # if training is over
         plt.title("Result")
@@ -19,10 +22,10 @@ def plot_returns(episode_returns: torch.Tensor, show_result=False):
         plt.title("Training...")
     plt.xlabel("Episode")
     plt.ylabel("Return")
-    plt.plot(episode_returns.numpy())
+    plt.plot(episode_returns_np)
 
-    if len(episode_returns) >= 100:
-        means = episode_returns.unfold(0, 100, 1).mean(1).view(-1)
+    if len(episode_returns_np) >= 100:
+        means = episode_returns_np.unfold(0, 100, 1).mean(1).view(-1)
         means = torch.cat((torch.ones(99) * means[0], means))
         plt.plot(means.numpy())
 
@@ -40,3 +43,6 @@ def mp4_to_gif(mp4_path: str, gif_path: str, filename: str):
     """Convert .mp4 to .gif"""
     videoClip = VideoFileClip(mp4_path + filename + ".mp4")
     videoClip.write_gif(gif_path + filename + ".gif")
+
+def tuple_of_tensors_to_tensor(tuple_of_tensors):
+    return torch.stack(list(tuple_of_tensors), dim=0)
